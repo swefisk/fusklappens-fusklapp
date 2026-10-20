@@ -1,0 +1,13 @@
+{
+  "name": "fusklappens-fusklapp",
+  "version": "1.0.0",
+  "description": "Readable financial statements, key ratios and support/resistance charts for US stocks.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

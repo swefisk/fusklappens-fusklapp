@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fusklappens fusklapp</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M7 22l6-6 4 4 8-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <script>
+    // Apply the saved theme before first paint so the page never flashes the wrong colors.
+    try { var t = localStorage.getItem('ss.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#" aria-label="Fusklappens fusklapp home">
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--series-1)"/><path d="M7 22l6-6 4 4 8-9" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Fusklappens fusklapp</span>
+      </a>
+      <form id="search" class="search" autocomplete="off" role="search">
+        <input id="q" name="q" type="text" placeholder="Ticker, company or commodity, e.g. AAPL or gold" aria-label="Ticker symbol" list="suggestions" spellcheck="false">
+        <datalist id="suggestions"></datalist>
+        <button type="submit">Analyze</button>
+      </form>
+      <label class="switch" title="Show a plain-English explanation under every line item and ratio">
+        <input type="checkbox" id="explain"> <span>Explain terms</span>
+      </label>
+      <button id="theme" class="icon-btn" type="button"></button>
+    </div>
+  </header>
+
+  <main id="app">
+    <div id="status" class="status" role="status" hidden></div>
+
+    <section id="welcome" class="welcome">
+      <h1>Financial statements, made readable.</h1>
+      <p>Type a US ticker to see the company's latest income statement, balance sheet and cash flow from its SEC filings, along with key ratios and a price chart with buy/sell trends and support and resistance levels. Raw materials like gold and oil get the full trend chart too.</p>
+      <div class="chips" id="examples"></div>
+    </section>
+
+    <div id="results" hidden>
+      <!-- Company header -->
+      <section id="company" class="company"></section>
+
+      <!-- Price chart -->
+      <section id="chart-card" class="card">
+        <div class="card-head">
+          <div>
+            <h2>Price chart</h2>
+            <p class="sub">Green shading = buy trend, red = sell trend, with arrows where the trend flips. Dashed lines are trendlines; horizontal lines are support (stöd) &amp; resistance (motstånd).</p>
+          </div>
+          <div class="seg" id="ranges" role="group" aria-label="Chart range">
+            <button data-range="3mo">3M</button><button data-range="6mo">6M</button><button data-range="1y">1Y</button><button data-range="2y">2Y</button><button data-range="5y">5Y</button><button data-range="10y">10Y</button>
+          </div>
+        </div>
+        <div class="toolbar" id="chart-toggles">
+          <label class="chip-toggle"><input type="checkbox" data-show="trend"><span class="sw sw-trend"></span>Buy / sell trend</label>
+          <label class="chip-toggle"><input type="checkbox" data-show="levels"><span class="sw sw-sr"></span>Support / resistance</label>
+          <label class="chip-toggle"><input type="checkbox" data-show="sma50"><span class="sw" style="background:var(--sma50)"></span>SMA 50</label>
+          <label class="chip-toggle"><input type="checkbox" data-show="sma200"><span class="sw" style="background:var(--sma200)"></span>SMA 200</label>
+          <label class="chip-toggle"><input type="checkbox" data-show="volume"><span class="sw" style="background:var(--text-muted)"></span>Volume</label>
+          <label class="chip-toggle"><input type="checkbox" data-show="rsi"><span class="sw" style="background:var(--series-1)"></span>RSI</label>
+          <label class="select-wrap">Trend
+            <select id="tsens" aria-label="Trend sensitivity">
+              <option value="fast">Fast (more signals)</option>
+              <option value="med">Balanced</option>
+              <option value="slow">Slow (fewer signals)</option>
+            </select>
+          </label>
+          <label class="select-wrap select-wrap-2">Levels
+            <select id="sens" aria-label="Level sensitivity">
+              <option value="low">Major only</option>
+              <option value="med">Balanced</option>
+              <option value="high">Detailed</option>
+            </select>
+          </label>
+        </div>
+        <div class="chart-grid">
+          <div class="chart-col">
+            <div class="chart-box">
+              <div id="ohlc-legend" class="ohlc"></div>
+              <div id="price-chart" class="price-chart"></div>
+            </div>
+            <div id="rsi-wrap" class="rsi-wrap">
+              <div class="rsi-label">RSI (14)</div>
+              <div id="rsi-chart" class="rsi-chart"></div>
+            </div>
+          </div>
+          <aside id="levels" class="levels" aria-label="Support and resistance levels"></aside>
+        </div>
+        <details class="howto">
+          <summary>How are trends, signals and levels calculated?</summary>
+          <p><b>Buy / sell trends</b> use the Supertrend method. A trailing line follows the price at a distance of a few "average true ranges" (a measure of normal daily movement). While price stays above the line, the trend is a <b>buy trend</b> and the line ratchets up underneath it. A close below the line flips the trend to a <b>sell trend</b>, and the line jumps above the price. Each flip is marked with a Buy or Sell arrow. "Fast" reacts sooner but gives more false signals; "Slow" ignores more noise but reacts later. <b>Trend strength</b> comes from ADX: below 20 means the market is choppy and signals are less reliable. <b>Trendlines</b> (dashed) connect the rising lows of an uptrend or the falling highs of a downtrend. The signal list shows how each past signal turned out, so you can judge how well the method fits this market.</p>
+          <p>The app finds swing highs and lows: bars whose high or low is the most extreme within a window of surrounding bars. It then groups turning points that sit within about one average true range (ATR) of each other. Each group becomes a level. A level gets stronger the more times price has touched it, the more recently it was touched, and if it has worked as both a floor and a ceiling ("role reversal"). Levels above the current price are <b>resistance</b>; levels below are <b>support</b>. Thicker lines mean stronger levels. These are mechanical estimates, not predictions.</p>
+        </details>
+      </section>
+
+      <div class="fin-only">
+        <!-- Quick take -->
+        <section id="snapshot" class="card">
+          <div class="card-head"><h2>Quick take</h2><p class="sub" id="snapshot-sub"></p></div>
+          <ul id="snapshot-list" class="snapshot"></ul>
+        </section>
+
+        <!-- Ratios -->
+        <section id="ratios-card" class="card">
+          <div class="card-head">
+            <div>
+              <h2>Key ratios</h2>
+              <p class="sub"><span class="mark good" aria-hidden="true">✓</span> healthy &nbsp; <span class="mark bad" aria-hidden="true">!</span> worth a closer look &nbsp;- general rules of thumb that vary a lot by industry.</p>
+            </div>
+          </div>
+          <div class="table-scroll"><table id="ratios" class="fin-table ratios"></table></div>
+        </section>
+
+        <!-- Highlights -->
+        <section id="highlights" class="card">
+          <div class="card-head">
+            <div><h2>Trends</h2><p class="sub">Hover a bar or line for exact values.</p></div>
+            <div class="seg period-seg" role="group" aria-label="Period">
+              <button data-period="annual">Annual</button><button data-period="quarterly">Quarterly</button>
+            </div>
+          </div>
+          <div class="mini-grid">
+            <figure class="mini"><figcaption>Revenue</figcaption><div class="viz" id="viz-revenue"></div></figure>
+            <figure class="mini"><figcaption>Net income</figcaption><div class="viz" id="viz-netIncome"></div></figure>
+            <figure class="mini"><figcaption>Free cash flow</figcaption><div class="viz" id="viz-fcf"></div></figure>
+            <figure class="mini"><figcaption>EPS (diluted)</figcaption><div class="viz" id="viz-eps"></div></figure>
+            <figure class="mini mini-wide">
+              <figcaption>Margins
+                <span class="legend">
+                  <span><i class="swatch" style="background:var(--series-1)"></i>Gross</span>
+                  <span><i class="swatch" style="background:var(--series-2)"></i>Operating</span>
+                  <span><i class="swatch" style="background:var(--series-3)"></i>Net</span>
+                </span>
+              </figcaption>
+              <div class="viz" id="viz-margins"></div>
+            </figure>
+          </div>
+        </section>
+
+        <!-- Statements -->
+        <section id="statements" class="card">
+          <div class="card-head">
+            <div>
+              <h2>Financial statements</h2>
+              <p class="sub" id="stmt-sub">From the company's 10-K and 10-Q filings with the SEC. Small figures under each value show the change versus the same period a year earlier.</p>
+            </div>
+            <div class="seg period-seg" role="group" aria-label="Period">
+              <button data-period="annual">Annual</button><button data-period="quarterly">Quarterly</button>
+            </div>
+          </div>
+          <div class="tabs" role="tablist">
+            <button role="tab" data-stmt="income">Income statement</button>
+            <button role="tab" data-stmt="balance">Balance sheet</button>
+            <button role="tab" data-stmt="cash">Cash flow</button>
+          </div>
+          <p class="stmt-intro" id="stmt-intro"></p>
+          <div class="table-scroll"><table id="stmt-table" class="fin-table"></table></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    Financial data: SEC EDGAR (XBRL company facts). Prices: Yahoo Finance (may be delayed). Figures are computed automatically and may contain errors.
+    For information and education only, not investment advice.
+  </footer>
+
+  <script src="sr.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
