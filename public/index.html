@@ -27,6 +27,7 @@
       <label class="switch" title="Show a plain-English explanation under every line item and ratio">
         <input type="checkbox" id="explain"> <span>Explain terms</span>
       </label>
+      <button id="watch-nav" class="icon-btn watch-nav" type="button" title="Your watchlist" aria-label="Your watchlist"><span aria-hidden="true">★</span><span id="watch-count" class="watch-count"></span></button>
       <button id="theme" class="icon-btn" type="button"></button>
     </div>
   </header>
@@ -60,6 +61,13 @@
         <h1>Financial statements, made readable.</h1>
         <p>Type a US ticker to see the company's latest income statement, balance sheet and cash flow from its SEC filings, along with key ratios and a price chart with buy/sell trends and support and resistance levels. Raw materials like gold and oil get the full trend chart too.</p>
         <div class="chips" id="examples"></div>
+        <section id="watchlist" class="watchlist" aria-labelledby="wl-title">
+          <div class="wl-head">
+            <h2 id="wl-title">Your watchlist</h2>
+            <span class="sub" id="wl-sub">Saved in this browser</span>
+          </div>
+          <div id="wl-grid" class="wl-grid"></div>
+        </section>
         <img class="welcome-cat" src="img/cat.webp" width="951" height="753" alt="A wide-eyed ginger cat staring at the camera">
       </div>
       <div class="welcome-art right" aria-hidden="true">

@@ -30,6 +30,14 @@ set SEC_USER_AGENT=Your Name you@example.com
 - Financials: SEC EDGAR XBRL "company facts" API (free, official). Quarterly values that companies only report year-to-date (most cash-flow items, and Q4) are derived by subtraction.
 - Prices: Yahoo Finance chart endpoint (free, unofficial, may be delayed).
 
+## Watchlist
+
+Click **☆ Add to watchlist** next to any stock or commodity name. Saved tickers (up to 30) are stored in a cookie in your own browser and shown on the start page with the live price, today's change, the current buy/sell trend and a 3-month sparkline. The ★ button in the top bar jumps to it.
+
+## Stress test
+
+Start the server, then in a second terminal run `npm run stress` (or `node scripts/stress-test.js http://localhost:3000`). It loads 30 companies and 6 commodities, simulates 50 users browsing for 30 seconds and a burst of 25 watchlist page loads, and reports latency, errors and server memory (from `/api/health`). To mimic Render's 512 MB free plan, start the server with `node --max-old-space-size=400 server.js`.
+
 ## Live charts
 
 With **Live** on (the default), the price and the latest candle update every 15 seconds while the market is open (every minute when closed, paused while the tab is hidden). The **1D** (1-minute candles) and **5D** (5-minute candles) ranges grow a new candle as each one forms, and trends, levels and indicators recalculate without resetting your zoom. The server caches each quote for 10 seconds, so many viewers of the same ticker share one request to Yahoo. Stock prices are close to real-time; futures can be delayed by up to about 10 minutes.

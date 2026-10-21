@@ -154,6 +154,7 @@
     else if (!state.prices) setStatus('warn', `Financials only - price data unavailable: ${px.reason?.message}`);
     else setStatus(null);
     $('#welcome').hidden = true;
+    clearInterval(wlTimer);
     $('#results').hidden = false;
     renderAll();
     startLive();
@@ -173,6 +174,7 @@
     document.title = 'swe_fisk analysis';
     if (location.hash) history.pushState(null, '', location.pathname + location.search);
     window.scrollTo(0, 0);
+    renderWatchlist();
   }
 
   async function changeRange(range) {
@@ -228,7 +230,7 @@
     }
     $('#company').innerHTML = `
       <div class="co-name">
-        <h1>${esc(name)}</h1>
+        <div class="co-title"><h1>${esc(name)}</h1>${starButton()}</div>
         <div class="co-meta"><span class="tick">${esc(state.ticker)}</span>${q.assetType === 'commodity' ? ' · Commodity futures' : ''}${q.exchange ? ' · ' + esc(q.exchange) : ''}${q.currency ? ' · ' + esc(q.currency) : ''}${q.unit ? ' ' + esc(q.unit) : ''}</div>
         <div class="co-price"><span class="px">${usd(q.price)}</span>
           ${isNum(chg) ? `<span class="delta ${dir}">${chg > 0 ? '▲' : chg < 0 ? '▼' : ''} ${usd(Math.abs(chg)).replace(MINUS, '')} (${signedPct(chgPct, 2)})</span><span class="muted sub">today</span>` : ''}
@@ -696,6 +698,105 @@
     window.addEventListener('scroll', close, { passive: true, capture: true });
   }
 
+  // ------------------------------------------------------------ watchlist
+  // Saved in a cookie (one per browser, 2 years). Only ticker symbols are stored.
+  const WL_COOKIE = 'swefisk_watchlist', WL_MAX = 30;
+  const validSym = t => /^\^?[A-Z0-9=-]{1,15}$/.test(t);
+  function readWatchlist() {
+    const m = document.cookie.match(/(?:^|;\s*)swefisk_watchlist=([^;]*)/);
+    if (!m) return [];
+    try { return [...new Set(decodeURIComponent(m[1]).split(',').filter(validSym))].slice(0, WL_MAX); } catch { return []; }
+  }
+  function writeWatchlist(list) {
+    document.cookie = `${WL_COOKIE}=${encodeURIComponent(list.join(','))}; max-age=${60 * 60 * 24 * 730}; path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
+    updateWatchCount();
+  }
+  const isWatched = t => readWatchlist().includes(t);
+  function toggleWatch(t) {
+    const list = readWatchlist();
+    if (list.includes(t)) writeWatchlist(list.filter(x => x !== t));
+    else if (list.length >= WL_MAX) { setStatus('warn', `Your watchlist is full (${WL_MAX} tickers). Remove one first.`); return; }
+    else writeWatchlist([...list, t]);
+  }
+  function updateWatchCount() {
+    const n = readWatchlist().length;
+    $('#watch-count').textContent = n ? String(n) : '';
+  }
+  function starButton() {
+    if (!state.ticker) return '';
+    const on = isWatched(state.ticker);
+    return `<button type="button" class="star-btn${on ? ' on' : ''}" data-star aria-pressed="${on}" title="${on ? 'Remove from watchlist' : 'Add to watchlist'}"><span aria-hidden="true">${on ? '★' : '☆'}</span>${on ? 'In watchlist' : 'Add to watchlist'}</button>`;
+  }
+
+  // Cards on the start page: price, today's change, current buy/sell trend and a 3-month sparkline.
+  const wlCache = new Map(); // ticker -> { name, bars, trendDir, quote }
+  let wlTimer = null;
+  async function loadWatchItem(t) {
+    const px = await api(`/api/prices/${encodeURIComponent(t)}?range=6mo`);
+    const tr = TA.trendAnalysis(px.bars, 'med');
+    const item = { name: px.meta.name, bars: px.bars, trendDir: tr?.current.dir ?? null, quote: { price: px.meta.price, previousClose: px.meta.previousClose } };
+    wlCache.set(t, item);
+    return item;
+  }
+  async function refreshWatchQuotes() {
+    if ($('#welcome').hidden || document.hidden) return;
+    for (const t of readWatchlist()) {
+      if (!wlCache.has(t)) continue;
+      try {
+        const q = await api('/api/quote/' + encodeURIComponent(t));
+        wlCache.get(t).quote = { price: q.price, previousClose: q.previousClose, marketOpen: q.marketOpen };
+        paintWatchCard(t);
+      } catch { /* keep the last known price */ }
+    }
+  }
+  function paintWatchCard(t) {
+    const card = $(`.wl-card[data-t="${CSS.escape(t)}"]`);
+    const it = wlCache.get(t);
+    if (!card || !it) return;
+    const q = it.quote, ch = isNum(q.price) && isNum(q.previousClose) && q.previousClose ? (q.price - q.previousClose) / q.previousClose : null;
+    card.querySelector('.wl-name').textContent = it.name || '';
+    card.querySelector('.wl-price').textContent = usd(q.price);
+    const chg = card.querySelector('.wl-chg');
+    chg.className = 'wl-chg ' + (ch > 0 ? 'pos' : ch < 0 ? 'neg' : '');
+    chg.textContent = isNum(ch) ? `${ch > 0 ? '▲' : ch < 0 ? '▼' : ''} ${signedPct(ch, 2)}` : '';
+    const tr = card.querySelector('.wl-trend');
+    tr.className = 'wl-trend ' + (it.trendDir > 0 ? 'up' : it.trendDir < 0 ? 'down' : '');
+    tr.textContent = it.trendDir > 0 ? '▲ Buy trend' : it.trendDir < 0 ? '▼ Sell trend' : '';
+    card.querySelector('.wl-spark').innerHTML = Viz.sparkline(it.bars.slice(-63).map(b => b.close));
+    card.classList.remove('is-loading');
+  }
+  function renderWatchlist() {
+    clearInterval(wlTimer);
+    const list = readWatchlist();
+    updateWatchCount();
+    $('#wl-sub').textContent = list.length ? `Saved in this browser · ${list.length} of ${WL_MAX}` : 'Saved in this browser';
+    if (!list.length) {
+      $('#wl-grid').innerHTML = '<p class="wl-empty">Nothing saved yet. Open any stock or commodity and click <b>☆ Add to watchlist</b> next to its name.</p>';
+      return;
+    }
+    $('#wl-grid').innerHTML = list.map(t => `
+      <div class="wl-card is-loading" data-t="${esc(t)}" role="button" tabindex="0" aria-label="Open ${esc(t)}">
+        <div class="wl-top"><span class="wl-sym">${esc(t)}</span><button type="button" class="wl-remove" data-remove="${esc(t)}" title="Remove ${esc(t)} from watchlist" aria-label="Remove ${esc(t)} from watchlist">×</button></div>
+        <div class="wl-name"></div>
+        <div class="wl-row"><span class="wl-price">…</span><span class="wl-chg"></span></div>
+        <div class="wl-row"><span class="wl-trend"></span><span class="wl-spark"></span></div>
+      </div>`).join('');
+    // Load cards a few at a time so a long list doesn't fire every request at once.
+    const queue = list.filter(t => { if (wlCache.has(t)) { paintWatchCard(t); return false; } return true; });
+    const worker = async () => {
+      while (queue.length) {
+        const t = queue.shift();
+        try { await loadWatchItem(t); paintWatchCard(t); }
+        catch {
+          const card = $(`.wl-card[data-t="${CSS.escape(t)}"]`);
+          if (card) { card.classList.remove('is-loading'); card.querySelector('.wl-price').textContent = 'Unavailable'; }
+        }
+      }
+    };
+    Promise.all([worker(), worker(), worker()]).then(refreshWatchQuotes);
+    wlTimer = setInterval(refreshWatchQuotes, 30000);
+  }
+
   // ------------------------------------------------------------ controls
   function syncControls() {
     $$('#ranges button').forEach(b => b.classList.toggle('is-on', b.dataset.range === state.range));
@@ -785,6 +886,25 @@
       `<div class="chip-row"><span class="chip-label">Stocks</span>${['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'JPM', 'KO'].map(t => chip([t])).join('')}</div>` +
       `<div class="chip-row"><span class="chip-label">Raw materials</span>${[['GC=F', 'Gold'], ['SI=F', 'Silver'], ['CL=F', 'Oil (WTI)'], ['BZ=F', 'Oil (Brent)'], ['NG=F', 'Natural gas'], ['HG=F', 'Copper']].map(chip).join('')}</div>`;
     $('#examples').addEventListener('click', e => { const b = e.target.closest('button'); if (b) loadTicker(b.dataset.t); });
+    $('#company').addEventListener('click', e => {
+      if (!e.target.closest('[data-star]') || !state.ticker) return;
+      toggleWatch(state.ticker);
+      renderHeader();
+    });
+    $('#wl-grid').addEventListener('click', e => {
+      const rm = e.target.closest('[data-remove]');
+      if (rm) { toggleWatch(rm.dataset.remove); wlCache.delete(rm.dataset.remove); renderWatchlist(); return; }
+      const card = e.target.closest('.wl-card');
+      if (card) loadTicker(card.dataset.t);
+    });
+    $('#wl-grid').addEventListener('keydown', e => {
+      const card = e.target.closest('.wl-card');
+      if (card && e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); loadTicker(card.dataset.t); }
+    });
+    $('#watch-nav').addEventListener('click', () => {
+      if (state.ticker) goHome(); else renderWatchlist();
+      $('#watchlist').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
 
   bind();
@@ -792,4 +912,6 @@
   syncControls();
   const initial = decodeURIComponent(location.hash.slice(1));
   if (initial) loadTicker(initial);
+  else renderWatchlist();
+  updateWatchCount();
 })();

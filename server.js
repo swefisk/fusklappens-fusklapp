@@ -15,14 +15,25 @@ const PUBLIC = path.join(__dirname, 'public');
 const DAY = 86400000;
 
 // ---------------------------------------------------------------- helpers
+// In-memory cache. Stores the promise, so simultaneous requests for the same thing share one fetch.
 const cache = new Map();
 async function cached(key, ttl, fn) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.t < ttl) return hit.v;
-  const v = await fn();
-  cache.set(key, { t: Date.now(), v });
-  return v;
+  if (hit && Date.now() - hit.t < hit.ttl) return hit.p;
+  const entry = { t: Date.now(), ttl, p: fn() };
+  cache.set(key, entry);
+  try {
+    return await entry.p;
+  } catch (e) {
+    if (cache.get(key) === entry) cache.delete(key); // never cache failures
+    throw e;
+  }
 }
+// Drop expired entries every 10 minutes so memory doesn't creep up.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, e] of cache) if (now - e.t >= e.ttl) cache.delete(k);
+}, 10 * 60000).unref();
 
 function userError(message, status = 400) {
   const e = new Error(message);
@@ -536,15 +547,19 @@ async function getCompany(raw) {
   const t = await resolveTicker(raw);
   return cached(`co:${t.ticker}`, 10 * 60000, async () => {
     const cik = String(t.cik).padStart(10, '0');
-    const [facts, px] = await Promise.all([
-      cached(`facts:${cik}`, 6 * 3600000, () => getJSON(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`, { 'User-Agent': SEC_UA }))
-        .catch(e => {
+    // The raw SEC file is ~4 MB (tens of MB once parsed), so only the small processed result is
+    // kept; the raw file is released as soon as it has been processed.
+    const [built, px] = await Promise.all([
+      cached(`fin:${cik}`, 6 * 3600000, async () => {
+        const facts = await getJSON(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`, { 'User-Agent': SEC_UA }).catch(e => {
           if (e.status === 404) throw userError(`The SEC has no financial statements on file for ${t.ticker}. ETFs, funds and trusts do not publish income statements or balance sheets.`, 404);
           throw e;
-        }),
+        });
+        return { fin: buildFinancials(facts), entityName: facts.entityName };
+      }),
       getPrices(t.ticker, '3mo').catch(() => null),
     ]);
-    const fin = buildFinancials(facts);
+    const fin = built.fin;
     const price = px?.meta?.price ?? null;
     const latestQuarter = fin.quarterly.rows[0] || fin.annual.rows[0] || {};
     const shares = fin.shares?.shares || latestQuarter.sharesDiluted || null;
@@ -552,7 +567,7 @@ async function getCompany(raw) {
     const bal = fin.ttm || latestQuarter;
     const ev = has(mcap) ? mcap + (bal.totalDebt || 0) - (bal.cash || 0) - (bal.shortTermInvestments || 0) : null;
     return {
-      ticker: t.ticker, name: facts.entityName || t.name, cik,
+      ticker: t.ticker, name: built.entityName || t.name, cik,
       secUrl: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=10-&dateb=&owner=include&count=40`,
       quote: px?.meta || null,
       shares, sharesAsOf: fin.shares?.asOf || null, marketCap: mcap, enterpriseValue: ev,
@@ -599,6 +614,11 @@ async function handleApi(url, res) {
       const sym = normTicker(decodeURIComponent(parts[2]));
       if (!/^\^?[A-Z0-9=-]{1,15}$/.test(sym)) throw userError('That does not look like a ticker symbol.');
       return send(res, 200, await getQuote(sym));
+    }
+    if (parts[1] === 'health') {
+      const m = process.memoryUsage();
+      const mb = x => Math.round((x / 1048576) * 10) / 10;
+      return send(res, 200, { ok: true, uptimeS: Math.round(process.uptime()), rssMB: mb(m.rss), heapUsedMB: mb(m.heapUsed), cacheEntries: cache.size });
     }
     if (parts[1] === 'commodities') return send(res, 200, COMMODITIES);
     return send(res, 404, { error: 'Unknown API route' });
