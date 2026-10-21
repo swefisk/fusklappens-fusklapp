@@ -1,4 +1,4 @@
-# Fusklappens fusklapp
+# swe_fisk analysis
 
 Type a US ticker and get:
 
