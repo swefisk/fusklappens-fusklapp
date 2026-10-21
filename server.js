@@ -453,12 +453,14 @@ const COMMODITIES = [
   { ticker: 'PL=F', name: 'Platinum', unit: 'per troy ounce' },
   { ticker: 'PA=F', name: 'Palladium', unit: 'per troy ounce' },
 ];
-const RANGES = { '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d', '5y': '1d', '10y': '1wk', max: '1mo' };
+const RANGES = { '1d': '1m', '5d': '5m', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d', '5y': '1d', '10y': '1wk', max: '1mo' };
 
 async function getPrices(ticker, range) {
   const interval = RANGES[range] || '1d';
   const r = RANGES[range] ? range : '1y';
-  return cached(`px:${ticker}:${r}`, 5 * 60000, async () => {
+  const intraday = /m$/.test(interval);
+  // Intraday data feeds the live chart, so it is only cached briefly.
+  return cached(`px:${ticker}:${r}`, intraday ? 15000 : 5 * 60000, async () => {
     let j;
     try {
       j = await getJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${r}&interval=${interval}&includePrePost=false`, { 'User-Agent': YAHOO_UA });
@@ -483,11 +485,48 @@ async function getPrices(ticker, range) {
         assetType: commodity ? 'commodity' : m.instrumentType === 'FUTURE' ? 'future' : m.instrumentType === 'INDEX' ? 'index' : 'equity', exchange: m.fullExchangeName || m.exchangeName,
         currency: m.currency, price: m.regularMarketPrice,
         // Daily bars: the bar before the latest one is the previous session's close.
-        previousClose: interval === '1d' && bars.length > 1 ? bars[bars.length - 2].close : m.previousClose ?? null,
+        previousClose: interval === '1d' && bars.length > 1 ? bars[bars.length - 2].close : r === '1d' ? m.chartPreviousClose ?? null : m.previousClose ?? null,
         dayHigh: m.regularMarketDayHigh, dayLow: m.regularMarketDayLow,
-        high52: m.fiftyTwoWeekHigh, low52: m.fiftyTwoWeekLow, marketTime: m.regularMarketTime, interval,
+        high52: m.fiftyTwoWeekHigh, low52: m.fiftyTwoWeekLow, marketTime: m.regularMarketTime, interval, gmtoffset: m.gmtoffset || 0,
       },
       bars,
+    };
+  });
+}
+
+// Latest price for live updates. Cached for 10 s, so many viewers of one ticker share one Yahoo request.
+async function getQuote(ticker) {
+  return cached(`q:${ticker}`, 10000, async () => {
+    let j;
+    try {
+      j = await getJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1d&interval=1m&includePrePost=false`, { 'User-Agent': YAHOO_UA });
+    } catch (e) {
+      if (e.status === 404) throw userError(`No price data found for "${ticker}".`, 404);
+      throw e;
+    }
+    const res = j.chart?.result?.[0];
+    if (!res) throw userError(`No price data found for "${ticker}".`, 404);
+    const m = res.meta, q = res.indicators?.quote?.[0] || {}, ts = res.timestamp || [];
+    let hi = -Infinity, lo = Infinity, vol = 0, open = null;
+    for (let i = 0; i < ts.length; i++) {
+      if (has(q.high?.[i])) hi = Math.max(hi, q.high[i]);
+      if (has(q.low?.[i])) lo = Math.min(lo, q.low[i]);
+      vol += q.volume?.[i] || 0;
+      if (open === null && has(q.open?.[i])) open = q.open[i];
+    }
+    const reg = m.currentTradingPeriod?.regular;
+    const now = Date.now() / 1000;
+    return {
+      price: m.regularMarketPrice,
+      previousClose: m.chartPreviousClose ?? m.previousClose ?? null,
+      open,
+      dayHigh: m.regularMarketDayHigh ?? (Number.isFinite(hi) ? hi : null),
+      dayLow: m.regularMarketDayLow ?? (Number.isFinite(lo) ? lo : null),
+      volume: m.regularMarketVolume ?? vol,
+      time: m.regularMarketTime,
+      sessionStart: reg?.start ?? null,
+      marketOpen: !!reg && now >= reg.start && now < reg.end,
+      gmtoffset: m.gmtoffset || 0,
     };
   });
 }
@@ -555,6 +594,11 @@ async function handleApi(url, res) {
       const sym = normTicker(decodeURIComponent(parts[2]));
       if (!/^\^?[A-Z0-9=-]{1,15}$/.test(sym)) throw userError('That does not look like a ticker symbol.');
       return send(res, 200, await getPrices(sym, url.searchParams.get('range') || '1y'));
+    }
+    if (parts[1] === 'quote' && parts[2]) {
+      const sym = normTicker(decodeURIComponent(parts[2]));
+      if (!/^\^?[A-Z0-9=-]{1,15}$/.test(sym)) throw userError('That does not look like a ticker symbol.');
+      return send(res, 200, await getQuote(sym));
     }
     if (parts[1] === 'commodities') return send(res, 200, COMMODITIES);
     return send(res, 404, { error: 'Unknown API route' });

@@ -30,6 +30,10 @@ set SEC_USER_AGENT=Your Name you@example.com
 - Financials: SEC EDGAR XBRL "company facts" API (free, official). Quarterly values that companies only report year-to-date (most cash-flow items, and Q4) are derived by subtraction.
 - Prices: Yahoo Finance chart endpoint (free, unofficial, may be delayed).
 
+## Live charts
+
+With **Live** on (the default), the price and the latest candle update every 15 seconds while the market is open (every minute when closed, paused while the tab is hidden). The **1D** (1-minute candles) and **5D** (5-minute candles) ranges grow a new candle as each one forms, and trends, levels and indicators recalculate without resetting your zoom. The server caches each quote for 10 seconds, so many viewers of the same ticker share one request to Yahoo. Stock prices are close to real-time; futures can be delayed by up to about 10 minutes.
+
 ## Buy / sell trends (stocks and raw materials)
 
 Works for any stock and for commodities: gold `GC=F`, silver `SI=F`, oil `CL=F` (WTI) / `BZ=F` (Brent), natural gas `NG=F`, copper `HG=F`, platinum `PL=F`, palladium `PA=F`. You can also just type "gold", "oil", "copper" etc.

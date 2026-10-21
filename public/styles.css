@@ -303,3 +303,17 @@ body.explain .fin-table .note { display: block; }
   .welcome h1 { font-size: 24px; }
   .fin-table th:first-child, .fin-table td:first-child { min-width: 150px; }
 }
+
+/* ---------- live updates ---------- */
+.live-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; cursor: default; }
+.live-badge:empty { display: none; }
+.live-badge.on { color: var(--good-text); }
+.live-badge.on i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 60%, transparent); animation: live-pulse 2s infinite; }
+.live-badge.err { color: var(--critical-text); }
+@keyframes live-pulse { 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.sw-live { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+.px.flash-up { animation: flash-up 1.2s ease-out; }
+.px.flash-down { animation: flash-down 1.2s ease-out; }
+@keyframes flash-up { from { color: var(--good-text); } }
+@keyframes flash-down { from { color: var(--critical-text); } }
+@media (prefers-reduced-motion: reduce) { .live-badge.on i, .px.flash-up, .px.flash-down { animation: none; } }

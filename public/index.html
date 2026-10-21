@@ -52,10 +52,11 @@
             <p class="sub">Green shading = buy trend, red = sell trend, with arrows where the trend flips. Dashed lines are trendlines; horizontal lines are support (stöd) &amp; resistance (motstånd).</p>
           </div>
           <div class="seg" id="ranges" role="group" aria-label="Chart range">
-            <button data-range="3mo">3M</button><button data-range="6mo">6M</button><button data-range="1y">1Y</button><button data-range="2y">2Y</button><button data-range="5y">5Y</button><button data-range="10y">10Y</button>
+            <button data-range="1d">1D</button><button data-range="5d">5D</button><button data-range="3mo">3M</button><button data-range="6mo">6M</button><button data-range="1y">1Y</button><button data-range="2y">2Y</button><button data-range="5y">5Y</button><button data-range="10y">10Y</button>
           </div>
         </div>
         <div class="toolbar" id="chart-toggles">
+          <label class="chip-toggle" title="Update the price and latest candle automatically"><input type="checkbox" data-show="live"><span class="sw sw-live"></span>Live</label>
           <label class="chip-toggle"><input type="checkbox" data-show="trend"><span class="sw sw-trend"></span>Buy / sell trend</label>
           <label class="chip-toggle"><input type="checkbox" data-show="levels"><span class="sw sw-sr"></span>Support / resistance</label>
           <label class="chip-toggle"><input type="checkbox" data-show="sma50"><span class="sw" style="background:var(--sma50)"></span>SMA 50</label>

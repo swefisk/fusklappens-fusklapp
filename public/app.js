@@ -18,7 +18,7 @@
     sens: load('sens', 'med'),
     tsens: load('tsens', 'med'),
     trend: null,
-    show: Object.assign({ trend: true, levels: true, sma50: true, sma200: true, volume: true, rsi: true }, show || {}),
+    show: Object.assign({ live: true, trend: true, levels: true, sma50: true, sma200: true, volume: true, rsi: true }, show || {}),
   };
 
   // ------------------------------------------------------------ formatting
@@ -40,6 +40,10 @@
   const fmtUnit = (v, unit) => (unit === 'eps' ? usd(v) : unit === 'shares' ? compact(v) : money(v));
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtDate = (t, opts = { month: 'short', day: 'numeric', year: 'numeric' }) => new Date(t * 1000).toLocaleDateString('en-US', opts);
+  const fmtClock = t => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const fmtBarTime = (t, intraday) => (intraday
+    ? new Date(t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+    : fmtDate(t));
   const yoy = (cur, prev) => (isNum(cur) && isNum(prev) && prev !== 0 ? (cur - prev) / Math.abs(prev) : null);
   const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
@@ -120,6 +124,9 @@
     const t = String(raw || '').trim().toUpperCase().replace(/\./g, '-');
     if (!t) return;
     const seq = ++loadSeq;
+    stopLive();
+    state.liveQuote = null;
+    state.liveStatus = null;
     state.ticker = t;
     if (decodeURIComponent(location.hash.slice(1)) !== t) history.replaceState(null, '', '#' + encodeURIComponent(t));
     $('#q').value = t;
@@ -149,6 +156,7 @@
     $('#welcome').hidden = true;
     $('#results').hidden = false;
     renderAll();
+    startLive();
   }
 
   async function changeRange(range) {
@@ -156,9 +164,11 @@
     save('range', range);
     syncControls();
     if (!state.ticker) return;
+    stopLive();
     try {
       state.prices = await api(`/api/prices/${encodeURIComponent(state.ticker)}?range=${range}`);
       renderChart();
+      startLive();
     } catch (e) {
       setStatus('warn', `Could not load ${range} prices: ${e.message}`);
     }
@@ -180,7 +190,7 @@
   }
 
   function renderHeader() {
-    const c = state.company, q = c?.quote || state.prices?.meta || {};
+    const c = state.company, q = { ...(c?.quote || state.prices?.meta || {}), ...(state.liveQuote || {}) };
     const name = c?.name || q.name || state.ticker;
     const chg = isNum(q.price) && isNum(q.previousClose) ? q.price - q.previousClose : null;
     const chgPct = isNum(chg) ? chg / q.previousClose : null;
@@ -206,9 +216,36 @@
         <div class="co-meta"><span class="tick">${esc(state.ticker)}</span>${q.assetType === 'commodity' ? ' · Commodity futures' : ''}${q.exchange ? ' · ' + esc(q.exchange) : ''}${q.currency ? ' · ' + esc(q.currency) : ''}${q.unit ? ' ' + esc(q.unit) : ''}</div>
         <div class="co-price"><span class="px">${usd(q.price)}</span>
           ${isNum(chg) ? `<span class="delta ${dir}">${chg > 0 ? '▲' : chg < 0 ? '▼' : ''} ${usd(Math.abs(chg)).replace(MINUS, '')} (${signedPct(chgPct, 2)})</span><span class="muted sub">today</span>` : ''}
+          <span id="live-badge" class="live-badge"></span>
         </div>
       </div>
       <div class="stats">${stats.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+    // Briefly flash the price green/red when a live update moves it.
+    if (isNum(state.shownPrice) && isNum(q.price) && q.price !== state.shownPrice && state.shownTicker === state.ticker) {
+      $('#company .px').classList.add(q.price > state.shownPrice ? 'flash-up' : 'flash-down');
+    }
+    state.shownPrice = q.price;
+    state.shownTicker = state.ticker;
+    renderLiveBadge();
+  }
+
+  function renderLiveBadge() {
+    const el = $('#live-badge');
+    if (!el) return;
+    const st = state.liveStatus;
+    let cls = 'live-badge', html = '', title = '';
+    if (!state.show.live) { cls += ' off'; html = 'Live off'; title = 'Turn on "Live" above the chart for automatic price updates.'; }
+    else if (!st) html = '';
+    else if (st.mode === 'live') {
+      cls += ' on'; html = `<i aria-hidden="true"></i>Live · ${fmtClock(st.checked)}`;
+      title = 'Updates every 15 seconds while the market is open. Stock prices are close to real-time; futures may be delayed up to about 10 minutes.';
+    } else if (st.mode === 'closed') {
+      cls += ' closed'; html = 'Market closed' + (st.time ? ` · last trade ${fmtBarTime(st.time, true)}` : '');
+      title = 'Checking once a minute; updates resume automatically when the market opens.';
+    } else { cls += ' err'; html = 'Reconnecting…'; title = 'The last live update failed; retrying shortly.'; }
+    el.className = cls;
+    el.innerHTML = html;
+    el.title = title;
   }
 
   // ------------------------------------------------------------ render: price chart
@@ -218,7 +255,12 @@
     mainChart = rsiChart = null;
   }
 
-  function renderChart() {
+  // chart handles used by live updates
+  let live = { candles: null, vol: null, setLegend: null, hovering: false, len: 0 };
+
+  function renderChart({ keepView = false } = {}) {
+    const prevRange = keepView && mainChart ? mainChart.timeScale().getVisibleLogicalRange() : null;
+    const prevLen = live.len;
     destroyCharts();
     const P = state.prices;
     $('#chart-card').hidden = !P || !P.bars?.length;
@@ -230,17 +272,26 @@
     }
     const bars = P.bars;
     const daily = P.meta.interval === '1d';
+    const intraday = /m$/.test(P.meta.interval);
+    // Show times in the viewer's own time zone (the chart library would otherwise use UTC).
+    const tickFmt = (t, type) => {
+      const d = new Date(t * 1000);
+      if (type === 0) return String(d.getFullYear());
+      if (type === 1) return d.toLocaleDateString('en-US', { month: 'short' });
+      if (type === 2) return String(d.getDate());
+      return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    };
     const base = {
       autoSize: true,
       layout: { background: { type: 'solid', color: cssVar('--surface-1') }, textColor: cssVar('--text-muted'), fontFamily: getComputedStyle(document.body).fontFamily, fontSize: 11 },
       grid: { vertLines: { color: cssVar('--grid') }, horzLines: { color: cssVar('--grid') } },
       rightPriceScale: { borderColor: cssVar('--axis'), minimumWidth: 76 },
-      timeScale: { borderColor: cssVar('--axis'), rightOffset: 3 },
+      timeScale: { borderColor: cssVar('--axis'), rightOffset: 3, timeVisible: intraday, secondsVisible: false, tickMarkFormatter: tickFmt },
       crosshair: { mode: LC.CrosshairMode.Normal },
       // Let the mouse wheel scroll the page; drag to pan, drag the axes (or pinch) to zoom.
       handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true },
-      localization: { priceFormatter: p => '$' + p.toFixed(2) },
+      localization: { priceFormatter: p => '$' + p.toFixed(2), timeFormatter: t => fmtBarTime(t, intraday) },
     };
     mainChart = LC.createChart($('#price-chart'), { ...base, timeScale: { ...base.timeScale, visible: !state.show.rsi } });
     const up = cssVar('--up'), down = cssVar('--down');
@@ -255,9 +306,11 @@
     }
     const candles = mainChart.addCandlestickSeries({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false, priceLineColor: cssVar('--text-muted') });
     candles.setData(bars);
+    live.candles = candles;
+    live.vol = null;
 
     if (state.show.volume) {
-      const vol = mainChart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
+      const vol = live.vol = mainChart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
       mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       const us = cssVar('--up-soft'), ds = cssVar('--down-soft');
       vol.setData(bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? us : ds })));
@@ -304,12 +357,17 @@
     const setLegend = i => {
       const b = bars[i], prev = bars[i - 1];
       const ch = prev ? (b.close - prev.close) / prev.close : null;
-      legend.innerHTML = `<span>${fmtDate(b.time)}</span><span>O <b>${b.open.toFixed(2)}</b></span><span>H <b>${b.high.toFixed(2)}</b></span><span>L <b>${b.low.toFixed(2)}</b></span><span>C <b>${b.close.toFixed(2)}</b></span>` +
+      legend.innerHTML = `<span>${fmtBarTime(b.time, intraday)}</span><span>O <b>${b.open.toFixed(2)}</b></span><span>H <b>${b.high.toFixed(2)}</b></span><span>L <b>${b.low.toFixed(2)}</b></span><span>C <b>${b.close.toFixed(2)}</b></span>` +
         (isNum(ch) ? `<span class="${ch >= 0 ? 'up' : 'down'}">${signedPct(ch, 2)}</span>` : '') + (b.volume ? `<span>Vol <b>${compact(b.volume)}</b></span>` : '') +
         (trendAt.has(b.time) ? `<span class="${trendAt.get(b.time) > 0 ? 'up' : 'down'}">${trendAt.get(b.time) > 0 ? '▲ Buy trend' : '▼ Sell trend'}</span>` : '');
     };
     setLegend(bars.length - 1);
-    mainChart.subscribeCrosshairMove(p => setLegend(p.time && idx.has(p.time) ? idx.get(p.time) : bars.length - 1));
+    live.setLegend = setLegend;
+    live.hovering = false;
+    mainChart.subscribeCrosshairMove(p => {
+      live.hovering = !!(p.time && idx.has(p.time));
+      setLegend(live.hovering ? idx.get(p.time) : bars.length - 1);
+    });
 
     $('#rsi-wrap').hidden = !state.show.rsi;
     const rsiData = TA.rsi(bars);
@@ -331,7 +389,13 @@
         if (p.time) rsiChart.setCrosshairPosition(NaN, p.time, rs); else rsiChart.clearCrosshairPosition();
       });
     }
-    mainChart.timeScale().fitContent();
+    if (prevRange) {
+      // New candles were added: keep the zoom, and keep following the right edge if the user was there.
+      const shift = bars.length - prevLen;
+      const atEnd = prevRange.to >= prevLen - 2;
+      mainChart.timeScale().setVisibleLogicalRange(atEnd ? { from: prevRange.from + shift, to: prevRange.to + shift } : prevRange);
+    } else mainChart.timeScale().fitContent();
+    live.len = bars.length;
     renderLevels(bars, rsiData, daily);
   }
 
@@ -340,6 +404,77 @@
     return `<span class="strength" title="${label} level" aria-label="${label}"><b>${'●'.repeat(s)}</b><span>${'●'.repeat(3 - s)}</span></span> ${label}`;
   }
 
+  // ------------------------------------------------------------ live updates
+  // Every 15 s while the market is open (60 s when closed, paused while the tab is hidden):
+  // update the latest candle and the header price. A new candle triggers a full re-render so
+  // trends, levels and indicators include it, keeping the user's zoom.
+  const isIntradayRange = r => r === '1d' || r === '5d';
+  let liveTimer = null, liveRun = 0;
+  function stopLive() { clearTimeout(liveTimer); liveRun++; }
+  function startLive() {
+    stopLive();
+    renderLiveBadge();
+    if (!state.show.live || !state.prices) return;
+    const run = liveRun;
+    const tick = async () => {
+      if (run !== liveRun) return;
+      if (document.hidden) { liveTimer = setTimeout(tick, 5000); return; }
+      try { await liveTick(); } catch { state.liveStatus = { mode: 'error' }; renderLiveBadge(); }
+      if (run === liveRun) liveTimer = setTimeout(tick, state.liveStatus?.mode === 'live' ? 15000 : 60000);
+    };
+    tick();
+  }
+
+  async function liveTick() {
+    const t = state.ticker, P = state.prices, range = state.range;
+    const q = await api('/api/quote/' + encodeURIComponent(t));
+    if (state.prices !== P || state.ticker !== t) return;
+    let added = 0;
+    const bars = P.bars;
+    if (isIntradayRange(range)) {
+      const fresh = await api(`/api/prices/${encodeURIComponent(t)}?range=${range}`);
+      if (state.prices !== P) return;
+      const lastT = bars[bars.length - 1].time;
+      const newer = fresh.bars.filter(b => b.time >= lastT);
+      if (newer.length) {
+        added = newer.filter(b => b.time > lastT).length;
+        bars.splice(bars.length - 1, 1, ...newer);
+      }
+    } else if (isNum(q.price)) {
+      const last = bars[bars.length - 1];
+      const daily = P.meta.interval === '1d';
+      const day = x => Math.floor((x + (q.gmtoffset || 0)) / 86400);
+      if (daily && day(q.time) > day(last.time)) {
+        // A new trading day: start a new daily candle.
+        bars.push({
+          time: q.sessionStart && day(q.sessionStart) === day(q.time) ? q.sessionStart : q.time,
+          open: q.open ?? q.price, high: q.dayHigh ?? q.price, low: q.dayLow ?? q.price, close: q.price, volume: q.volume || 0,
+        });
+        added = 1;
+      } else if (!daily || day(q.time) === day(last.time)) {
+        last.close = q.price;
+        last.high = Math.max(last.high, q.price, daily && isNum(q.dayHigh) ? q.dayHigh : -Infinity);
+        last.low = Math.min(last.low, q.price, daily && isNum(q.dayLow) ? q.dayLow : Infinity);
+        if (daily && q.volume) last.volume = q.volume;
+      }
+    }
+    state.liveQuote = { price: q.price, previousClose: q.previousClose, dayHigh: q.dayHigh, dayLow: q.dayLow };
+    state.liveStatus = { mode: q.marketOpen ? 'live' : 'closed', time: q.time, checked: Date.now() / 1000 };
+    if (added) renderChart({ keepView: true });
+    else if (live.candles) {
+      const b = bars[bars.length - 1];
+      live.candles.update(b);
+      live.vol?.update({ time: b.time, value: b.volume, color: cssVar(b.close >= b.open ? '--up-soft' : '--down-soft') });
+      if (!live.hovering) live.setLegend(bars.length - 1);
+      const now = $('.lv-now span:last-child');
+      if (now) now.textContent = usd(b.close);
+    }
+    renderHeader();
+  }
+
+  // Signal times: include the clock time on intraday charts.
+  const barDate = t => fmtBarTime(t, /m$/.test(state.prices?.meta?.interval || ''));
+
   function trendPanel() {
     const T = state.trend;
     if (!T) return '';
@@ -347,7 +482,7 @@
     const a = c.adx;
     const strength = !isNum(a) ? '—' : a < 20 ? `Weak / choppy (ADX ${a.toFixed(0)})` : a < 40 ? `Established (ADX ${a.toFixed(0)})` : `Very strong (ADX ${a.toFixed(0)})`;
     const rows = [
-      [c.fromStart ? 'Since (start of chart)' : 'Started', `${fmtDate(c.since)} at ${usd(c.startPrice)}`],
+      [c.fromStart ? 'Since (start of chart)' : 'Started', `${barDate(c.since)} at ${usd(c.startPrice)}`],
       ['Move since then', `<span class="${c.change >= 0 ? 'pos' : 'neg'}">${signedPct(c.change)}</span>`],
       ['Trend strength', strength],
       [`Turns ${up ? 'sell' : 'buy'} on a close ${up ? 'below' : 'above'}`, `${usd(c.flipLevel)} <span class="muted">(${signedPct((c.flipLevel - state.prices.bars[state.prices.bars.length - 1].close) / state.prices.bars[state.prices.bars.length - 1].close)})</span>`],
@@ -368,7 +503,7 @@
           <span class="sig-tag ${s.type}">${s.type === 'buy' ? '▲ Buy' : '▼ Sell'}</span>
           <span class="p">${usd(s.price)}</span>
           <span class="d ${s.move >= 0 ? 'pos' : 'neg'}">${signedPct(s.move)}</span>
-          <span class="meta"><span>${fmtDate(s.time)}</span><span class="sig-res ${res}">${resLabel}</span></span>
+          <span class="meta"><span>${barDate(s.time)}</span><span class="sig-res ${res}">${resLabel}</span></span>
         </li>`;
       }).join('')}</ol>`;
       html += `<p class="sig-sum">${done.length ? `<b>${ok} of ${done.length}</b> completed signals in this range moved in the signalled direction before the next flip.` : 'No completed signals in this range yet.'}</p>`;
@@ -591,6 +726,7 @@
     $('.tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.stmt = b.dataset.stmt; syncControls(); renderStatement(); });
     $('#chart-toggles').addEventListener('change', e => {
       if (e.target.dataset.show) { state.show[e.target.dataset.show] = e.target.checked; save('show', JSON.stringify(state.show)); }
+      if (e.target.dataset.show === 'live') { if (state.show.live) startLive(); else { stopLive(); renderLiveBadge(); } return; }
       if (e.target.id === 'sens') { state.sens = e.target.value; save('sens', state.sens); }
       if (e.target.id === 'tsens') { state.tsens = e.target.value; save('tsens', state.tsens); }
       renderChart();
@@ -618,6 +754,8 @@
       if (state.prices) renderChart(); // the chart library needs its colors re-applied
     });
     syncThemeBtn();
+    // Catch up immediately when the tab becomes visible again.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && state.show.live && state.prices) startLive(); });
     darkMq.addEventListener('change', () => { syncThemeBtn(); if (state.prices) renderChart(); });
     let rt;
     new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(renderHighlights, 120); }).observe($('#highlights'));
