@@ -120,7 +120,34 @@ main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #app.is-loading #results { opacity: .45; pointer-events: none; transition: opacity .2s; }
 
-.welcome { text-align: center; padding: 64px 0 40px; max-width: 640px; margin: 0 auto; }
+.welcome { text-align: center; padding: 56px 0 40px; max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 620px) minmax(0, 1fr); gap: 40px; align-items: center; }
+.welcome[hidden] { display: none; }
+.welcome-cat { display: block; width: 100%; max-width: 380px; height: auto; margin: 32px auto 0; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
+.welcome-art { display: flex; justify-content: center; }
+.welcome-art svg, .welcome-art img { width: 100%; max-width: 260px; height: auto; display: block; }
+.welcome-art.left > * { transform: rotate(-4deg); }
+.welcome-art.right > * { transform: rotate(4deg); }
+.welcome-art img { border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(0, 0, 0, .18); object-fit: cover; }
+.art-card { fill: var(--surface-1); stroke: var(--axis); stroke-width: 1; }
+.art-card2 { fill: var(--surface-2); stroke: var(--axis); stroke-width: 1; }
+.art-ink { fill: var(--text-secondary); opacity: .75; }
+.art-muted { fill: var(--axis); }
+.art-grid { stroke: var(--grid); stroke-width: 1; }
+.art-up { fill: var(--up); } .art-down { fill: var(--down); }
+.art-up-s { stroke: var(--up); stroke-width: 1.5; } .art-down-s { stroke: var(--down); stroke-width: 1.5; }
+.art-up-shade { fill: var(--up-shade-strong); } .art-down-shade { fill: var(--down-shade-strong); }
+.art-up-soft { fill: var(--up-shade-strong); }
+.art-line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.art-up-line { stroke: var(--up); } .art-down-line { stroke: var(--down); }
+.art-support { stroke: var(--support); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.art-support-tag { fill: var(--support); }
+.art-label { font: 700 10px var(--font); }
+.art-up-t { fill: var(--good-text); } .art-tag-t { fill: #fff; }
+.art-good { fill: var(--good); }
+.art-check { fill: none; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.art-bar { fill: var(--series-1); }
+.art-lens { fill: color-mix(in srgb, var(--series-1) 10%, transparent); stroke: var(--text-secondary); stroke-width: 5; }
+.art-handle { stroke: var(--text-secondary); stroke-width: 8; stroke-linecap: round; }
 .welcome h1 { font-size: 30px; margin-bottom: 10px; }
 .welcome p { color: var(--text-secondary); font-size: 15px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 20px; }
@@ -286,6 +313,8 @@ body.explain .fin-table .note { display: block; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 980px) {
+  .welcome { grid-template-columns: 1fr; gap: 0; }
+  .welcome-art { display: none; }
   .chart-grid { grid-template-columns: 1fr; }
   .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
   .mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -159,6 +159,22 @@
     startLive();
   }
 
+  // Back to the start page: stop live updates, clear the current ticker, show the welcome screen.
+  function goHome() {
+    loadSeq++; // cancels a load that is still in flight
+    stopLive();
+    destroyCharts();
+    Object.assign(state, { ticker: null, company: null, prices: null, trend: null, levels: null, liveQuote: null, liveStatus: null });
+    setStatus(null);
+    $('#app').classList.remove('is-loading');
+    $('#results').hidden = true;
+    $('#welcome').hidden = false;
+    $('#q').value = '';
+    document.title = 'swe_fisk analysis';
+    if (location.hash) history.pushState(null, '', location.pathname + location.search);
+    window.scrollTo(0, 0);
+  }
+
   async function changeRange(range) {
     state.range = range;
     save('range', range);
@@ -732,8 +748,12 @@
       renderChart();
     });
     $('#explain').addEventListener('change', e => { state.explain = e.target.checked; save('explain', state.explain ? '1' : '0'); syncControls(); });
-    $('.brand').addEventListener('click', e => { e.preventDefault(); });
-    window.addEventListener('hashchange', () => { const h = decodeURIComponent(location.hash.slice(1)); if (h && h !== state.ticker) loadTicker(h); });
+    $('.brand').addEventListener('click', e => { e.preventDefault(); goHome(); });
+    window.addEventListener('hashchange', () => {
+      const h = decodeURIComponent(location.hash.slice(1));
+      if (!h) goHome();
+      else if (h !== state.ticker) loadTicker(h);
+    });
     // Theme: follows the OS until the user picks one, then remembers it.
     const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
     const theme = () => document.documentElement.dataset.theme || (darkMq.matches ? 'dark' : 'light');
