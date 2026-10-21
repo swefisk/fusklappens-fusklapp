@@ -1,5 +1,5 @@
 {
-  "name": "fusklappens-fusklapp",
+  "name": "swe-fisk-analysis",
   "version": "1.0.0",
   "description": "Readable financial statements, key ratios and support/resistance charts for US stocks.",
   "main": "server.js",

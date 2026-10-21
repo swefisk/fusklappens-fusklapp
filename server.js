@@ -1,5 +1,5 @@
 'use strict';
-// Fusklappens fusklapp: a small local server that pulls US company financials from SEC EDGAR
+// swe_fisk analysis: a small local server that pulls US company financials from SEC EDGAR
 // and price history from Yahoo Finance, then serves the web UI in ./public.
 // No dependencies - needs Node 18+ (built-in fetch).
 
@@ -9,7 +9,7 @@ const path = require('path');
 
 const PORT = Number(process.env.PORT) || 3000;
 // The SEC asks API users to identify themselves. Set SEC_USER_AGENT to "Your Name your@email.com".
-const SEC_UA = process.env.SEC_USER_AGENT || 'FusklappensFusklapp/1.0 (personal research tool) admin@fusklappen.local';
+const SEC_UA = process.env.SEC_USER_AGENT || 'SweFiskAnalysis/1.0 (personal research tool) admin@swefisk.local';
 const YAHOO_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const PUBLIC = path.join(__dirname, 'public');
 const DAY = 86400000;
@@ -622,4 +622,4 @@ http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/')) handleApi(url, res);
   else handleStatic(url, res);
-}).listen(PORT, () => console.log(`Fusklappens fusklapp running at http://localhost:${PORT}`));
+}).listen(PORT, () => console.log(`swe_fisk analysis running at http://localhost:${PORT}`));

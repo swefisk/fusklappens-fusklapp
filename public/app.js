@@ -130,7 +130,7 @@
     state.ticker = t;
     if (decodeURIComponent(location.hash.slice(1)) !== t) history.replaceState(null, '', '#' + encodeURIComponent(t));
     $('#q').value = t;
-    document.title = `${t} · Fusklappens fusklapp`;
+    document.title = `${t} · swe_fisk analysis`;
     // Futures (GC=F), indexes (^GSPC) and the like have no SEC filings - chart only.
     const priceOnly = /[=^]/.test(t);
     setStatus('loading', priceOnly ? `Loading ${t} price history…` : `Loading ${t} - fetching SEC filings and price history…`);
